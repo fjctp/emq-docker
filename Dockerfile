@@ -76,6 +76,7 @@ RUN set -ex \
         ncurses-terminfo \
         ncurses-libs \
         readline \
+        curl \
     # add latest rebar
     && wget https://github.com/rebar/rebar/wiki/rebar -O /usr/bin/rebar \
     && chmod +x /usr/bin/rebar \
