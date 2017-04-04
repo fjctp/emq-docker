@@ -95,6 +95,7 @@ do
     if [[ ! -z "$(echo $VAR | grep -E '^EMQ_')" ]]; then
         VAR_NAME=$(echo "$VAR" | sed -r "s/EMQ_(.*)=.*/\1/g" | tr '[:upper:]' '[:lower:]' | sed -r "s/__/\./g")
         VAR_FULL_NAME=$(echo "$VAR" | sed -r "s/(.*)=.*/\1/g")
+        echo "#### $VAR_FULL_NAME ==> $VAR_NAME"
         # Config in emq.conf, use "~" instead as sed's delimiter
         if [[ ! -z "$(cat $CONFIG |grep -E "^(^|^#*|^#*\s*)$VAR_NAME")" ]]; then
             echo "$VAR_NAME=$(eval echo \$$VAR_FULL_NAME)"
@@ -144,6 +145,8 @@ do
 done
 
 echo "['$(date -u +"%Y-%m-%dT%H:%M:%SZ")']:emqttd start"
+# Add current node to external record server
+curl -X POST -s $EMQ_RECORD_SERVER_HOST:$EMQ_RECORD_SERVER_PORT/nodes/$EMQ_NODE__NAME
 
 # Run cluster script
 
@@ -151,8 +154,24 @@ if [[ -x "./cluster.sh" ]]; then
     ./cluster.sh &
 fi
 
-# Join an exist cluster
+# Get master node name from external record server
+echo "connect to record server at $EMQ_RECORD_SERVER_HOST:$EMQ_RECORD_SERVER_PORT"
+EMQ_JOIN_CLUSTER=$(curl -X GET -s $EMQ_RECORD_SERVER_HOST:$EMQ_RECORD_SERVER_PORT/master | sed -e 's/"//g')
+while [ $EMQ_JOIN_CLUSTER == "-1" ]
+do
+    sleep 1
+    echo "waiting for master node"
+    EMQ_JOIN_CLUSTER=$(curl -X GET -s $EMQ_RECORD_SERVER_HOST:$EMQ_RECORD_SERVER_PORT/master | sed -e 's/"//g')
+done
+echo "current node: $EMQ_NODE__NAME"
+echo "master node: $EMQ_JOIN_CLUSTER"
 
+if [ "$EMQ_JOIN_CLUSTER" ==  "$EMQ_NODE__NAME" ]; then
+    echo "Master node, unset EMQ_JOIN_CLUSTER"
+    unset EMQ_JOIN_CLUSTER
+fi
+
+# Join an exist cluster
 if [[ ! -z "$EMQ_JOIN_CLUSTER" ]]; then
     echo "['$(date -u +"%Y-%m-%dT%H:%M:%SZ")']:emqttd try join $EMQ_JOIN_CLUSTER"
     /opt/emqttd/bin/emqttd_ctl cluster join $EMQ_JOIN_CLUSTER &
@@ -185,5 +204,9 @@ done
 
 # tail $(ls /opt/emqttd/log/*)
 
+# Remove current node from external record server
+curl -X DELETE -s $EMQ_RECORD_SERVER_HOST:$EMQ_RECORD_SERVER_PORT/nodes/$EMQ_NODE__NAME
+
+# Exit emqttd with error
 echo "['$(date -u +"%Y-%m-%dT%H:%M:%SZ")']:emqttd exit abnormally"
 exit 1
